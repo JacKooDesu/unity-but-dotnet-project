@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       repository:
-        description: "GitHub repository URL of the Unity project"
+        description: "GitHub repository name"
         required: true
         type: string
       branch:
@@ -16,9 +16,6 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Current
-        uses: actions/checkout@v4
-
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
@@ -27,13 +24,13 @@ jobs:
           token: ${{ secrets.GH_PAT_TOKEN }}
           clean: false
 
-      - name: Exclude Assets, Copy Tool Script
+      - name: Exclude Assets, Fetch Tool Script
         run: |
           ls
           mv Assets _Assets
           mkdir -p Assets
           mkdir -p Assets/Editor
-          cp Tools/CopyDLLs.cs Assets/Editor/
+          curl -o Assets/Editor/CopyDLLs.cs https://raw.githubusercontent.com/JacKooDesu/unity-but-dotnet-project/main/Tools/CopyDLLs.cs
 
       - name: Compile and Exit
         uses: game-ci/unity-builder@v4
