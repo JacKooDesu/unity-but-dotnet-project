@@ -3,50 +3,51 @@ on:
   workflow_dispatch:
     inputs:
       repository:
-        description: 'GitHub repository URL of the Unity project'
+        description: "GitHub repository URL of the Unity project"
         required: true
         type: string
       branch:
-        description: 'Branch of the Unity project'
+        description: "Branch of the Unity project"
         required: true
         type: string
-        default: 'main'
+        default: "main"
 
 jobs:
-   build:
-     runs-on: ubuntu-latest
-     steps:
-       - name: Checkout Current
-         uses: actions/checkout@v4
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Current
+        uses: actions/checkout@v4
 
-       - name: Checkout Repository
-         uses: actions/checkout@v4
-         with:
-           repository: ${{ inputs.repository }}
-           ref: "refs/heads/${{inputs.branch}}"
-           token: ${{ secrets.GH_PAT_TOKEN }}
-           clean: false
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          ref: "refs/heads/${{inputs.branch}}"
+          token: ${{ secrets.GH_PAT_TOKEN }}
+          clean: false
 
-       - name: Exclude Assets, Copy Tool Script
-         run: |
-           mv Assets _Assets
-           mkdir -p Assets
-           mkdir -p Assets/Editor
-           cp Tools/CopyDLLs.cs Assets/Editor/
+      - name: Exclude Assets, Copy Tool Script
+        run: |
+          ls
+          mv Assets _Assets
+          mkdir -p Assets
+          mkdir -p Assets/Editor
+          cp Tools/CopyDLLs.cs Assets/Editor/
 
-       - name: Compile and Exit
-         uses: game-ci/unity-builder@v4
-         env:
-           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-           UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-         with:
-           projectPath: .
-           buildMethod: CopyDLLs.Run
-           customParameters: -batchmode -nographics
+      - name: Compile and Exit
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          projectPath: .
+          buildMethod: CopyDLLs.Run
+          customParameters: -batchmode -nographics
 
-       - name: Upload DLL Artifact
-         uses: actions/upload-artifact@v4
-         with:
-           name: project
-           path: ./exported/
+      - name: Upload DLL Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: project
+          path: ./exported/
