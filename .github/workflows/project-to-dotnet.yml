@@ -28,6 +28,7 @@ jobs:
 
        - name: Exclude Assets, Copy Tool Script
          run: |
+           ls
            mv Assets _Assets
            mkdir -p Assets
            mkdir -p Assets/Editor
