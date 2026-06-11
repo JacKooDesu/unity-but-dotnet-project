@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection;
-using System.Text;
 using System.Xml;
 using UnityEditor;
 using UnityEditor.Compilation;
@@ -88,6 +86,28 @@ public class DotnetGenerator
     static string EditorPath = Path.GetDirectoryName(EditorExePath);
     static string ProjectPath = Application.dataPath.Replace("/Assets", "");
     static string ExportPath = Path.Combine(ProjectPath, "exported");
+    const string PROJECT_NAME = "Project";
+
+    static XmlWriterSettings XmlSettings = new XmlWriterSettings
+    {
+        Indent = true,
+        IndentChars = "    ",
+        NewLineOnAttributes = false,
+        OmitXmlDeclaration = true
+    };
+
+    [MenuItem("UExtensions/Read Common Define Constants")]
+    public static void ReadCommonDefineConstants()
+    {
+        var assemblies = CompilationPipeline.GetAssemblies(AssembliesType.Player);
+        // var editorDllPath = Path.Combine(EditorPath, "Data", "Managed", "UnityEngine", "UnityEngine.dll");
+        // var defines = Assembly.LoadFrom(editorDllPath).dein;
+        foreach (var a in assemblies)
+        {
+            Debug.Log(a.name);
+            Debug.Log(string.Join("\n", a.defines));
+        }
+    }
 
     [MenuItem("UExtensions/Generate Dotnet Project")]
     public static void Run()
@@ -134,105 +154,159 @@ public class DotnetGenerator
 
         var editorCompiledAssemply = CompilationPipeline.GetAssemblies(AssembliesType.Editor)
             .ToDictionary(x => x.name);
+        UnityEditor.Compilation.Assembly assembly;
 
-        var settings = new XmlWriterSettings
-        {
-            Indent = true,
-            IndentChars = "    ",
-            NewLineOnAttributes = false,
-            OmitXmlDeclaration = true
-        };
-        var sb = new StringBuilder();
         foreach (var asmdef in projectAsmdefCollection.AsmdefList)
         {
-            using (var sw = File.CreateText(Path.Combine(ExportPath, asmdef.Name + ".csproj")))
-            using (var writer = XmlWriter.Create(sw, settings))
-            {
-                // <Project Sdk="Microsoft.NET.Sdk">
-                writer.WriteStartElement("Project");
-                writer.WriteAttributeString("Sdk", "Microsoft.NET.Sdk");
-
-                // PropertyGroup
-                writer.WriteStartElement("PropertyGroup");
+            var path = Path.GetRelativePath(assetDir, asmdef.Dir).Replace("/", "\\");
+            var refDlls = asmdef.References
+                .Select(reference =>
                 {
-                    writer.WriteElementString("TargetFramework", "netstandard2.0");
-                    writer.WriteElementString("LangVersion", "latest");
-                    writer.WriteElementString("ImplicitUsings", "disable");
-                    writer.WriteElementString("nullable", "enable");
-                    writer.WriteElementString("EnableDefaultCompileItems", "false");
-                    writer.WriteElementString("AllowUnsafeBlocks", asmdef.AllowUnsafeCode ? "true" : "false");
-
-                    // define constants
-                    if (editorCompiledAssemply.TryGetValue(asmdef.Name, out var ca))
-                        writer.WriteElementString("DefineConstants", string.Join(';', ca.defines));
-                }
-                writer.WriteEndElement();
-
-                // ItemGroup
-                writer.WriteStartElement("ItemGroup");
+                    if (packageAsmdefCollection.GuidDict.TryGetValue(reference, out var asmdefInfo) ||
+                        packageAsmdefCollection.NameDict.TryGetValue(reference, out asmdefInfo))
+                        return asmdefInfo;
+                    return null;
+                }).Where(x => x != null)
+                .Select(x => x.Name)
+                .ToArray();
+            var refProjects = asmdef.References
+                .Select(reference =>
                 {
-                    writer.WriteStartElement("Compile");
-                    var path = Path.GetRelativePath(assetDir, asmdef.Dir);
-                    writer.WriteAttributeString("Include", "ScriptProject\\" + path + "\\**\\*.cs");
-                    writer.WriteEndElement();
+                    if (projectAsmdefCollection.GuidDict.TryGetValue(reference, out var asmdefInfo) ||
+                        projectAsmdefCollection.NameDict.TryGetValue(reference, out asmdefInfo))
+                        return asmdefInfo;
+                    return null;
+                }).Where(x => x != null)
+                .Select(x => x.Name)
+                .ToArray();
 
-                    // reference dlls
-                    foreach (var reference in asmdef.References)
-                    {
-                        AsmdefInfo asmdefInfo;
-                        if (
-                            packageAsmdefCollection.GuidDict.TryGetValue(reference, out asmdefInfo) ||
-                            packageAsmdefCollection.NameDict.TryGetValue(reference, out asmdefInfo)
-                        )
-                        {
-                            var refDllPath = "Library\\Packages\\" + asmdefInfo.Name + ".dll";
-                            writer.WriteStartElement("Reference");
-                            {
-                                writer.WriteAttributeString("Include", asmdefInfo.Name);
-                                writer.WriteElementString("HintPath", refDllPath);
-                                writer.WriteElementString("Private", "False");
-                            }
-                            writer.WriteEndElement();
-                        }
-                        else if (
-                            projectAsmdefCollection.GuidDict.TryGetValue(reference, out asmdefInfo) ||
-                            projectAsmdefCollection.NameDict.TryGetValue(reference, out asmdefInfo)
-                        )
-                        {
-                            var refCsprojPath = asmdefInfo.Name + ".csproj";
-                            writer.WriteStartElement("ProjectReference");
-                            writer.WriteAttributeString("Include", refCsprojPath);
-                            writer.WriteEndElement();
-                        }
-                    }
+            var defineConstants = editorCompiledAssemply.TryGetValue(asmdef.Name, out assembly)
+                ? assembly.defines
+                : Array.Empty<string>();
 
-                    if (!asmdef.NoEngineReferences)
-                    {
-                        writer.WriteStartElement("Reference");
-                        writer.WriteAttributeString("Include", "Library\\UnityEngine\\*.dll");
-                        writer.WriteEndElement();
-                    }
-                }
-                writer.WriteEndElement();
-
-                // </Project>
-                writer.WriteEndElement();
-            }
-            sb.Clear();
+            WriteCsproj(
+                asmdef.Name,
+                path,
+                defineConstants,
+                refDlls,
+                refProjects,
+                Array.Empty<string>(),
+                asmdef.AllowUnsafeCode,
+                asmdef.NoEngineReferences);
         }
 
-        using (var sw = File.CreateText(Path.Combine(ExportPath, "ScriptProject.slnx")))
-        using (var writer = XmlWriter.Create(sw, settings))
+        // Create assembly csharp project
+        WriteCsproj(
+            "Assembly-CSharp",
+            ".",
+            editorCompiledAssemply.TryGetValue("Assembly-CSharp", out assembly)
+                ? assembly.defines
+                : Array.Empty<string>(),
+            new[] { "*" },
+            projectAsmdefCollection.AsmdefList.Select(x => x.Name).ToArray(),
+            projectAsmdefCollection.AsmdefList.Select(x => Path.GetRelativePath(assetDir, x.Dir).Replace("/", "\\")).ToArray());
+
+        using (var sw = File.CreateText(Path.Combine(ExportPath, PROJECT_NAME + ".slnx")))
+        using (var writer = XmlWriter.Create(sw, XmlSettings))
         {
             writer.WriteStartElement("Solution");
-            foreach (var asmdef in projectAsmdefCollection.AsmdefList)
+            foreach (var asmdef in projectAsmdefCollection.AsmdefList.Select(x => x.Name)
+                                                                     .Append("Assembly-CSharp"))
             {
                 writer.WriteStartElement("Project");
-                writer.WriteAttributeString("Path", asmdef.Name + ".csproj");
+                writer.WriteAttributeString("Path", asmdef + ".csproj");
                 writer.WriteEndElement();
             }
             writer.WriteEndElement();
         }
+    }
+
+    static void WriteCsproj(
+        string csprojName,
+        string projectPath,
+        string[] defineConstants,
+        string[] dllReferences,
+        string[] projectReferences,
+        string[] compileRemove,
+        bool allowUnsafe = false,
+        bool noEngineReferences = false
+    )
+    {
+        using var sw = File.CreateText(Path.Combine(ExportPath, csprojName + ".csproj"));
+        using var writer = XmlWriter.Create(sw, XmlSettings);
+
+        // <Project Sdk="Microsoft.NET.Sdk">
+        writer.WriteStartElement("Project");
+        writer.WriteAttributeString("Sdk", "Microsoft.NET.Sdk");
+
+        // PropertyGroup
+        writer.WriteStartElement("PropertyGroup");
+        {
+            writer.WriteElementString("TargetFramework", "netstandard2.0");
+            writer.WriteElementString("LangVersion", "latest");
+            writer.WriteElementString("ImplicitUsings", "disable");
+            writer.WriteElementString("nullable", "enable");
+            writer.WriteElementString("EnableDefaultCompileItems", "false");
+            writer.WriteElementString("AllowUnsafeBlocks", allowUnsafe ? "true" : "false");
+
+            // define constants
+            writer.WriteElementString("DefineConstants", string.Join(';', defineConstants));
+        }
+        writer.WriteEndElement();
+
+        // ItemGroup
+        writer.WriteStartElement("ItemGroup");
+        {
+            writer.WriteStartElement("Compile");
+            writer.WriteAttributeString("Include", PROJECT_NAME + "\\Assets\\" + projectPath + "\\**\\*.cs");
+            writer.WriteEndElement();
+
+            // compile remove
+            foreach (var remove in compileRemove)
+            {
+                writer.WriteStartElement("Compile");
+                writer.WriteAttributeString("Remove", PROJECT_NAME + "\\Assets\\" + remove + "\\*.cs");
+                writer.WriteEndElement();
+            }
+
+            // reference dlls
+            foreach (var dllName in dllReferences)
+            {
+                if (dllName is "*")
+                {
+                    writer.WriteStartElement("Reference");
+                    writer.WriteAttributeString("Include", "Library\\Packages\\*.dll");
+                    writer.WriteEndElement();
+                    break;
+                }
+
+                writer.WriteStartElement("Reference");
+                {
+                    writer.WriteAttributeString("Include", dllName);
+                    writer.WriteElementString("HintPath", "Library\\Packages\\" + dllName + ".dll");
+                    writer.WriteElementString("Private", "False");
+                }
+                writer.WriteEndElement();
+            }
+            // reference projects
+            foreach (var project in projectReferences)
+            {
+                writer.WriteStartElement("ProjectReference");
+                writer.WriteAttributeString("Include", project + ".csproj");
+                writer.WriteEndElement();
+            }
+
+            if (!noEngineReferences)
+            {
+                writer.WriteStartElement("Reference");
+                writer.WriteAttributeString("Include", "Library\\UnityEngine\\*.dll");
+                writer.WriteEndElement();
+            }
+        }
+        writer.WriteEndElement();
+
+        // </Project>
+        writer.WriteEndElement();
     }
 
     static void CopyDirectory(string sourceDir, string destinationDir, bool recursive, Func<FileInfo, bool> skipFunc)
