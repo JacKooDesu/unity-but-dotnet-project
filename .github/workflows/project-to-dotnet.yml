@@ -28,9 +28,9 @@ jobs:
         run: |
           TARGET_DIR="Assets"
 
-          find "$TARGET_DIR" -type f ! -name "*.asmdef" ! -name "*.asmdef.meta" ! -name "dummy.cs"
+          find "$TARGET_DIR" -type f ! -name "*.asmdef" ! -name "*.asmdef.meta" ! -name "dummy.cs" -delete
 
-          find "$TARGET_DIR" -name "*.asmdef" -exec dirname {} \; | while read -r dir;
+          find "$TARGET_DIR" -name "*.asmdef" -exec dirname {} \; | while read -r dir; do
             touch "$dir/dummy.cs"
           done
 
