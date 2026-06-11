@@ -10,7 +10,8 @@ This github action will generate csproj and necessary DLLs for you.
 
 1. Setup secrets
 2. Run action, dispatch the workflow with target `repository` and `branch` parameters
-3. Download the artifact the workflow generates
+3. Download and extract the artifact the workflow generates
+4. Git clone the repository in the extracted directory with name `Project`
 
 ## Secret
 
@@ -25,6 +26,14 @@ This github action will generate csproj and necessary DLLs for you.
 - GH_PAT_TOKEN
 
 > note: `Content` / `Metadata` permission required
+
+## Features
+
+- [x] `csproj` file generation tool
+- [x] Resolve engine dlls
+- [x] Resolve package dlls
+- [ ] Resolve NuGet packages
+- [ ] `.meta` file generation tool
 
 ## Thanks
 
