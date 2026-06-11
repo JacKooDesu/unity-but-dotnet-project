@@ -36,6 +36,8 @@ jobs:
 
           find "$TARGET_DIR" -type d -empty -delete
 
+          touch "$TARGET_DIR/dummy.cs"
+
           tree
 
           mkdir -p Assets/Editor
