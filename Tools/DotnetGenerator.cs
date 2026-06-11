@@ -89,19 +89,6 @@ public class DotnetGenerator
     static string ProjectPath = Application.dataPath.Replace("/Assets", "");
     static string ExportPath = Path.Combine(ProjectPath, "exported");
 
-    [MenuItem("UExtensions/Read Common Define Constants")]
-    public static void ReadCommonDefineConstants()
-    {
-        var assemblies = CompilationPipeline.GetAssemblies(AssembliesType.Player);
-        // var editorDllPath = Path.Combine(EditorPath, "Data", "Managed", "UnityEngine", "UnityEngine.dll");
-        // var defines = Assembly.LoadFrom(editorDllPath).dein;
-        foreach (var a in assemblies)
-        {
-            Debug.Log(a.name);
-            Debug.Log(string.Join("\n", a.defines));
-        }
-    }
-
     [MenuItem("UExtensions/Generate Dotnet Project")]
     public static void Run()
     {
