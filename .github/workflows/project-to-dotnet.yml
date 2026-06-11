@@ -26,11 +26,20 @@ jobs:
 
       - name: Exclude Assets, Fetch Tool Script
         run: |
-          ls
-          mv Assets _Assets
-          mkdir -p Assets
+          TARGET_DIR="Assets"
+
+          find "$TARGET_DIR" -type f ! -name "*.asmdef" ! -name "*.asmdef.meta" ! -name "dummy.cs"
+
+          find "$TARGET_DIR" -name "*.asmdef" -exec dirname {} \; | while read -r dir;
+            touch "$dir/dummy.cs"
+          done
+
+          find "$TARGET_DIR" -type d -empty -delete
+
+          tree
+
           mkdir -p Assets/Editor
-          curl -o Assets/Editor/CopyDLLs.cs https://raw.githubusercontent.com/JacKooDesu/unity-but-dotnet-project/main/Tools/CopyDLLs.cs
+          curl -o Assets/Editor/DotnetGenerator.cs https://raw.githubusercontent.com/JacKooDesu/unity-but-dotnet-project/main/Tools/DotnetGenerator.cs
 
       - name: Compile and Exit
         uses: game-ci/unity-builder@v4
@@ -40,7 +49,7 @@ jobs:
           UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
           projectPath: .
-          buildMethod: CopyDLLs.Run
+          buildMethod: DotnetGenerator.Run
           customParameters: -batchmode -nographics
           allowDirtyBuild: true
 
