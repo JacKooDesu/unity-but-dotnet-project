@@ -34,6 +34,12 @@ This github action will generate csproj and necessary DLLs for you.
 - [x] Resolve package dlls
 - [ ] Resolve NuGet packages
 - [ ] `.meta` file generation tool
+- [ ] Analyzer include in item group integration
+- [ ] Scafolding tool
+
+## Known Issues
+
+- Currently only fully tested on Windows / Unity 6000 higher
 
 ## Thanks
 
