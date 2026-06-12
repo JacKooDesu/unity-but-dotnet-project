@@ -99,13 +99,14 @@ public class DotnetGenerator
     [MenuItem("UExtensions/Read Common Define Constants")]
     public static void ReadCommonDefineConstants()
     {
-        var assemblies = CompilationPipeline.GetAssemblies(AssembliesType.Player);
+        var assemblies = CompilationPipeline.GetAssemblies(AssembliesType.Editor);
         // var editorDllPath = Path.Combine(EditorPath, "Data", "Managed", "UnityEngine", "UnityEngine.dll");
         // var defines = Assembly.LoadFrom(editorDllPath).dein;
         foreach (var a in assemblies)
         {
             Debug.Log(a.name);
             Debug.Log(string.Join("\n", a.defines));
+            Debug.Log(string.Join("\n", a.compiledAssemblyReferences));
         }
     }
 
@@ -125,18 +126,32 @@ public class DotnetGenerator
 
         var packageDllsPath = Path.Combine(ProjectPath, "Library", "ScriptAssemblies");
 
+        var packagePrecompiledDllsPath = Path.Combine(ProjectPath, "Library", "PackageCache");
+
         var exportLibraryPath = Path.Combine(ExportPath, "Library");
         var exportEditorDllsPath = Path.Combine(exportLibraryPath, "UnityEngine");
         var exportPackageDllsPath = Path.Combine(exportLibraryPath, "Packages");
+        var exportPackageCacheDllsPath = Path.Combine(exportLibraryPath, "PackageCache");
 
         Directory.CreateDirectory(exportLibraryPath);
         Directory.CreateDirectory(exportEditorDllsPath);
         Directory.CreateDirectory(exportPackageDllsPath);
+        Directory.CreateDirectory(exportPackageCacheDllsPath);
 
         Func<FileInfo, bool> skipFunc = file =>
-            file.Extension == ".pdb" || file.Name.StartsWith("Assembly-CSharp");
+            file.Extension != ".dll";
+
+        var allReference = CompilationPipeline.GetAssemblies(AssembliesType.Editor)
+            .Aggregate(new HashSet<string>(), (set, a) =>
+            {
+                set.UnionWith(a.allReferences.Select(x => Path.GetFullPath(x)));
+                return set;
+            });
+
         CopyDirectory(editorDllsPath, exportEditorDllsPath, true, skipFunc);
         CopyDirectory(packageDllsPath, exportPackageDllsPath, true, skipFunc);
+        CopyDirectory(packagePrecompiledDllsPath, exportPackageCacheDllsPath, true,
+            file => skipFunc(file) || !allReference.Contains(file.FullName));
     }
 
     static void CollectAsmdef()
@@ -180,6 +195,7 @@ public class DotnetGenerator
                 .Select(x => x.Name)
                 .ToArray();
 
+
             var defineConstants = editorCompiledAssemply.TryGetValue(asmdef.Name, out assembly)
                 ? assembly.defines
                 : Array.Empty<string>();
@@ -188,7 +204,11 @@ public class DotnetGenerator
                 asmdef.Name,
                 path,
                 defineConstants,
-                refDlls,
+                assembly.allReferences
+                    .Where(x => x.Contains(ProjectPath))
+                    .Select(x => Path.GetRelativePath(ProjectPath, x))
+                    .Union(refDlls.Select(x => Path.Combine("Library", "Packages", x + ".dll")))
+                    .ToArray(),
                 refProjects,
                 Array.Empty<string>(),
                 asmdef.AllowUnsafeCode,
@@ -242,7 +262,7 @@ public class DotnetGenerator
         // PropertyGroup
         writer.WriteStartElement("PropertyGroup");
         {
-            writer.WriteElementString("TargetFramework", "netstandard2.0");
+            writer.WriteElementString("TargetFramework", "netstandard2.1");
             writer.WriteElementString("LangVersion", "latest");
             writer.WriteElementString("ImplicitUsings", "disable");
             writer.WriteElementString("nullable", "enable");
@@ -259,6 +279,8 @@ public class DotnetGenerator
         {
             writer.WriteStartElement("Compile");
             writer.WriteAttributeString("Include", PROJECT_NAME + "\\Assets\\" + projectPath + "\\**\\*.cs");
+            writer.WriteAttributeString("Exclude",
+                    string.Join(';', compileRemove.Select(x => PROJECT_NAME + "\\Assets\\" + x + "\\*.cs")));
             writer.WriteEndElement();
 
             // compile remove
@@ -270,9 +292,9 @@ public class DotnetGenerator
             }
 
             // reference dlls
-            foreach (var dllName in dllReferences)
+            foreach (var dllPath in dllReferences)
             {
-                if (dllName is "*")
+                if (dllPath is "*")
                 {
                     writer.WriteStartElement("Reference");
                     writer.WriteAttributeString("Include", "Library\\Packages\\*.dll");
@@ -282,8 +304,9 @@ public class DotnetGenerator
 
                 writer.WriteStartElement("Reference");
                 {
-                    writer.WriteAttributeString("Include", dllName);
-                    writer.WriteElementString("HintPath", "Library\\Packages\\" + dllName + ".dll");
+                    var name = Path.GetFileName(dllPath);
+                    writer.WriteAttributeString("Include", name.Replace(".dll", ""));
+                    writer.WriteElementString("HintPath", dllPath);
                     writer.WriteElementString("Private", "False");
                 }
                 writer.WriteEndElement();
@@ -309,7 +332,9 @@ public class DotnetGenerator
         writer.WriteEndElement();
     }
 
-    static void CopyDirectory(string sourceDir, string destinationDir, bool recursive, Func<FileInfo, bool> skipFunc)
+    static void CopyDirectory(
+        string sourceDir, string destinationDir, bool recursive,
+        Func<FileInfo, bool> skipFunc, bool flattenFile = false)
     {
         // Get information about the source directory
         var dir = new DirectoryInfo(sourceDir);
@@ -321,8 +346,7 @@ public class DotnetGenerator
         // Cache directories before we start copying
         DirectoryInfo[] dirs = dir.GetDirectories();
 
-        // Create the destination directory
-        Directory.CreateDirectory(destinationDir);
+        bool hasDirectory = false;
 
         // Get the files in the source directory and copy to the destination directory
         foreach (FileInfo file in dir.GetFiles())
@@ -330,8 +354,15 @@ public class DotnetGenerator
             if (skipFunc(file))
                 continue;
 
+            if (!hasDirectory)
+            {
+                // Create the destination directory
+                Directory.CreateDirectory(destinationDir);
+                hasDirectory = true;
+            }
+
             string targetFilePath = Path.Combine(destinationDir, file.Name);
-            file.CopyTo(targetFilePath);
+            file.CopyTo(targetFilePath, false);
         }
 
         // If recursive and copying subdirectories, recursively call this method
@@ -339,8 +370,8 @@ public class DotnetGenerator
         {
             foreach (DirectoryInfo subDir in dirs)
             {
-                string newDestinationDir = Path.Combine(destinationDir, subDir.Name);
-                CopyDirectory(subDir.FullName, newDestinationDir, true, skipFunc);
+                string newDestinationDir = flattenFile ? destinationDir : Path.Combine(destinationDir, subDir.Name);
+                CopyDirectory(subDir.FullName, newDestinationDir, true, skipFunc, flattenFile);
             }
         }
     }
