@@ -44,8 +44,9 @@ public class DotnetGenerator
             {
                 while ((line = reader.ReadLine()) != null)
                 {
-                    if (line.Trim().StartsWith("guid: "))
-                        return line.Trim().Substring(6);
+                    line = line.Trim();
+                    if (line.StartsWith("guid: "))
+                        return line.Substring(6);
                 }
             }
             return line;
@@ -174,26 +175,24 @@ public class DotnetGenerator
         foreach (var asmdef in projectAsmdefCollection.AsmdefList)
         {
             var path = Path.GetRelativePath(assetDir, asmdef.Dir).Replace("/", "\\");
-            var refDlls = asmdef.References
-                .Select(reference =>
-                {
-                    if (packageAsmdefCollection.GuidDict.TryGetValue(reference, out var asmdefInfo) ||
-                        packageAsmdefCollection.NameDict.TryGetValue(reference, out asmdefInfo))
-                        return asmdefInfo;
-                    return null;
-                }).Where(x => x != null)
-                .Select(x => x.Name)
-                .ToArray();
-            var refProjects = asmdef.References
-                .Select(reference =>
-                {
-                    if (projectAsmdefCollection.GuidDict.TryGetValue(reference, out var asmdefInfo) ||
-                        projectAsmdefCollection.NameDict.TryGetValue(reference, out asmdefInfo))
-                        return asmdefInfo;
-                    return null;
-                }).Where(x => x != null)
-                .Select(x => x.Name)
-                .ToArray();
+            var (refDlls, refProjects) = asmdef
+                .References
+                .Aggregate((new List<string>(), new List<string>()),
+                    (acc, reference) =>
+                    {
+                        var (dlls, projects) = acc;
+                        AsmdefInfo asmdefInfo;
+
+                        if (packageAsmdefCollection.GuidDict.TryGetValue(reference.Replace("GUID:", ""), out asmdefInfo) ||
+                            packageAsmdefCollection.NameDict.TryGetValue(reference, out asmdefInfo))
+                            dlls.Add(asmdefInfo.Name);
+                        else if (
+                            projectAsmdefCollection.GuidDict.TryGetValue(reference.Replace("GUID:", ""), out asmdefInfo) ||
+                            projectAsmdefCollection.NameDict.TryGetValue(reference, out asmdefInfo))
+                            projects.Add(asmdefInfo.Name);
+
+                        return (dlls, projects);
+                    });
 
 
             var defineConstants = editorCompiledAssemply.TryGetValue(asmdef.Name, out assembly)
@@ -209,7 +208,7 @@ public class DotnetGenerator
                     .Select(x => Path.GetRelativePath(ProjectPath, x))
                     .Union(refDlls.Select(x => Path.Combine("Library", "Packages", x + ".dll")))
                     .ToArray(),
-                refProjects,
+                refProjects.ToArray(),
                 Array.Empty<string>(),
                 asmdef.AllowUnsafeCode,
                 asmdef.NoEngineReferences);
@@ -280,14 +279,14 @@ public class DotnetGenerator
             writer.WriteStartElement("Compile");
             writer.WriteAttributeString("Include", PROJECT_NAME + "\\Assets\\" + projectPath + "\\**\\*.cs");
             writer.WriteAttributeString("Exclude",
-                    string.Join(';', compileRemove.Select(x => PROJECT_NAME + "\\Assets\\" + x + "\\*.cs")));
+                    string.Join(';', compileRemove.Select(x => PROJECT_NAME + "\\Assets\\" + x + "\\**\\*.cs")));
             writer.WriteEndElement();
 
             // compile remove
             foreach (var remove in compileRemove)
             {
                 writer.WriteStartElement("Compile");
-                writer.WriteAttributeString("Remove", PROJECT_NAME + "\\Assets\\" + remove + "\\*.cs");
+                writer.WriteAttributeString("Remove", PROJECT_NAME + "\\Assets\\" + remove + "\\**\\*.cs");
                 writer.WriteEndElement();
             }
 
@@ -297,7 +296,11 @@ public class DotnetGenerator
                 if (dllPath is "*")
                 {
                     writer.WriteStartElement("Reference");
-                    writer.WriteAttributeString("Include", "Library\\Packages\\*.dll");
+                    writer.WriteAttributeString("Include", "Library\\Packages\\**\\*.dll");
+                    writer.WriteEndElement();
+
+                    writer.WriteStartElement("Reference");
+                    writer.WriteAttributeString("Include", "Library\\PackageCache\\**\\*.dll");
                     writer.WriteEndElement();
                     break;
                 }
